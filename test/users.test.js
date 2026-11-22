@@ -53,3 +53,24 @@ test("stats reflect stored users", async () => {
   assert.equal(stats.users, 1);
   assert.ok(stats.usedMemory > 0);
 });
+
+test("serves the demo page and the fs view", async () => {
+  const page = await fetch(base);
+  assert.equal(page.status, 200);
+  assert.match(await page.text(), /Memspace users demo/);
+  const entries = await (await fetch(`${base}/fs`)).json();
+  assert.ok(entries.some((e) => e.path === "/users" && e.type === "directory"));
+});
+
+test("users carry a TTL and the user cap is enforced", async () => {
+  const { app, fs: small } = createApp({ maxUsers: 1, userTtlMs: 60_000 });
+  const s = app.listen(0);
+  await new Promise((r) => s.once("listening", r));
+  const url = `http://127.0.0.1:${s.address().port}/users`;
+  const send = () => fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "A", email: "a@b.c" }) });
+  const first = await (await send()).json();
+  assert.ok(first.expiresInMs > 0 && first.expiresInMs <= 60_000);
+  assert.equal((await send()).status, 507);
+  s.close();
+  small.dispose();
+});

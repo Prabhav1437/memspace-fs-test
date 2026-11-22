@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Memspace users demo</title>
+  <meta name="description" content="An Express users API whose storage is an in-memory filesystem (memspace-fs).">
+  <style>
+    :root {
+      --bg: #f6f7f9; --panel: #ffffff; --text: #16181d; --muted: #5d6573; --line: #e2e5ea;
+      --accent: #2f5bea; --accent-text: #ffffff; --danger: #c23a3a; --code: #eef1f6; --ok: #1f8a4c;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111317; --panel: #191c22; --text: #e8eaee; --muted: #9aa3b2; --line: #2a2f38;
+        --accent: #6d8cff; --accent-text: #0b0d12; --danger: #ff7a7a; --code: #222630; --ok: #5ccf8d;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    main { max-width: 960px; margin: 0 auto; padding: 32px 16px 64px; }
+    h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.01em; }
+    h2 { font-size: 15px; margin: 0 0 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+    p.lead { margin: 0 0 24px; color: var(--muted); max-width: 680px; }
+    a { color: var(--accent); }
+    code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; }
+    code { background: var(--code); padding: 1px 5px; border-radius: 4px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; min-width: 0; }
+    form { display: grid; gap: 10px; }
+    label { font-size: 13px; color: var(--muted); display: grid; gap: 4px; }
+    input { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
+    button { font: inherit; padding: 8px 14px; border-radius: 6px; border: 1px solid transparent; cursor: pointer; }
+    .primary { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+    .ghost { background: transparent; border-color: var(--line); color: var(--danger); padding: 4px 10px; font-size: 13px; }
+    .msg { min-height: 20px; font-size: 13px; color: var(--muted); }
+    .msg.error { color: var(--danger); }
+    .msg.ok { color: var(--ok); }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+    .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+    .stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+    .stat span { font-size: 12px; color: var(--muted); }
+    .bar { height: 6px; background: var(--code); border-radius: 3px; margin-top: 8px; overflow: hidden; }
+    .bar i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+    ul.users { list-style: none; margin: 0; padding: 0; }
+    ul.users li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+    ul.users li:first-child { border-top: 0; }
+    .who { min-width: 0; }
+    .who strong { display: block; overflow-wrap: anywhere; }
+    .who small { color: var(--muted); overflow-wrap: anywhere; }
+    .empty { color: var(--muted); font-size: 14px; }
+    pre { background: var(--code); padding: 12px; border-radius: 8px; overflow-x: auto; margin: 0; max-height: 320px; }
+    .full { grid-column: 1 / -1; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    td, th { text-align: left; padding: 6px 8px; border-top: 1px solid var(--line); }
+    th { color: var(--muted); font-weight: 500; border-top: 0; }
+    td.path { font-family: ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .table-wrap { overflow-x: auto; }
+    footer { margin-top: 28px; font-size: 13px; color: var(--muted); }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Memspace users demo</h1>
+  <p class="lead">
+    A small Express API whose only storage is <a href="https://www.npmjs.com/package/memspace-fs">memspace-fs</a>,
+    an in-memory filesystem with the Node <code>fs</code> API. Every user you add becomes a file at
+    <code>/users/&lt;id&gt;.json</code> in memory. Nothing touches the disk. Each user expires after an hour
+    (a memspace TTL), storage is capped at 5 MiB, and everything resets when the server restarts.
+  </p>
+
+  <div class="stats">
+    <div class="stat"><b id="s-users">–</b><span>users stored</span></div>
+    <div class="stat"><b id="s-mem">–</b><span>bytes used of 5 MiB</span><div class="bar"><i id="s-bar"></i></div></div>
+    <div class="stat"><b id="s-ttl">1 h</b><span>time-to-live per user</span></div>
+  </div>
+
+  <div class="grid">
+    <section class="panel">
+      <h2>Add a user</h2>
+      <form id="form">
+        <label>Name <input name="name" maxlength="100" required placeholder="Ada Lovelace"></label>
+        <label>Email <input name="email" type="email" maxlength="200" required placeholder="ada@example.com"></label>
+        <button class="primary" type="submit">POST /users</button>
+        <div class="msg" id="msg" role="status"></div>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>Users <small>(GET /users)</small></h2>
+      <ul class="users" id="users"><li class="empty">Loading…</li></ul>
+    </section>
+
+    <section class="panel full">
+      <h2>The in-memory filesystem right now <small>(GET /fs)</small></h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Path</th><th>Type</th><th class="num">Size</th><th class="num">Expires in</th></tr></thead>
+          <tbody id="fs"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel full">
+      <h2>Try it with curl</h2>
+<pre id="curl">curl -X POST ORIGIN/users -H 'content-type: application/json' \
+  -d '{"name":"Ada","email":"ada@example.com"}'
+curl ORIGIN/users
+curl ORIGIN/fs
+curl ORIGIN/stats</pre>
+    </section>
+  </div>
+
+  <footer>
+    Source: <a href="https://github.com/Prabhav1437/memspace-fs-test">memspace-fs-test</a> ·
+    Package: <a href="https://github.com/Prabhav1437/memspace">memspace</a>
+  </footer>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const msg = $("msg");
+  $("curl").textContent = $("curl").textContent.replaceAll("ORIGIN", location.origin);
+
+  const fmtTtl = (ms) => {
+    if (ms == null) return "—";
+    const m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000);
+    return m > 0 ? `${m}m ${s}s` : `${s}s`;
+  };
+
+  function setMsg(text, kind = "") {
+    msg.textContent = text;
+    msg.className = `msg ${kind}`;
+  }
+
+  function renderUsers(users) {
+    const list = $("users");
+    list.replaceChildren();
+    if (users.length === 0) {
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = "No users yet. Add one!";
+      list.append(li);
+      return;
+    }
+    for (const user of users) {
+      const li = document.createElement("li");
+      const who = document.createElement("div");
+      who.className = "who";
+      const name = document.createElement("strong");
+      name.textContent = user.name;
+      const meta = document.createElement("small");
+      meta.textContent = `${user.email} · expires in ${fmtTtl(user.expiresInMs)}`;
+      who.append(name, meta);
+      const del = document.createElement("button");
+      del.className = "ghost";
+      del.textContent = "Delete";
+      del.onclick = async () => {
+        await fetch(`/users/${user.id}`, { method: "DELETE" });
+        refresh();
+      };
+      li.append(who, del);
+      list.append(li);
+    }
+  }
+
+  function renderFs(entries) {
+    const body = $("fs");
+    body.replaceChildren();
+    for (const e of entries) {
+      const tr = document.createElement("tr");
+      const cells = [e.path, e.type, e.type === "file" ? `${e.size} B` : "", e.type === "file" ? fmtTtl(e.expiresInMs) : ""];
+      cells.forEach((value, i) => {
+        const td = document.createElement("td");
+        td.textContent = value;
+        if (i === 0) td.className = "path";
+        if (i >= 2) td.className = "num";
+        tr.append(td);
+      });
+      body.append(tr);
+    }
+  }
+
+  async function refresh() {
+    try {
+      const [users, stats, fsEntries] = await Promise.all(["/users", "/stats", "/fs"].map((p) => fetch(p).then((r) => r.json())));
+      renderUsers(users);
+      renderFs(fsEntries);
+      $("s-users").textContent = stats.users;
+      $("s-mem").textContent = stats.usedMemory.toLocaleString();
+      $("s-bar").style.width = `${Math.max(0.5, (stats.usedMemory / stats.maxMemory) * 100)}%`;
+    } catch {
+      setMsg("Could not reach the API.", "error");
+    }
+  }
+
+  $("form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.target));
+    const res = await fetch("/users", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) {
+      setMsg(`Created ${body.name}: wrote /users/${body.id}.json`, "ok");
+      event.target.reset();
+    } else {
+      setMsg(body.error ?? `Request failed (${res.status})`, "error");
+    }
+    refresh();
+  });
+
+  refresh();
+  setInterval(refresh, 5000);
+</script>
+</body>
+</html>
